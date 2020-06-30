@@ -14,6 +14,8 @@ import logging
 import torch
 import numpy
 
+import multiprocessing as mp
+from joblib import Parallel, delayed
 
 def pretty(vector):
     vlist = vector.view(-1).tolist()
@@ -42,11 +44,42 @@ def errors(w, w_hat):
     return error_causal, error_noncausal
 
 
+def run_methods(methods, setup_str, sem, environments, args, lock):
+
+    solutions = [
+            "{} SEM {} {:.5f} {:.5f}".format(setup_str,
+                                               pretty(sem.solution()), 0, 0)
+        ]
+
+    for method_name, method_constructor in methods.items():
+        logging.debug(f'run {setup_str} {method_name}')
+        method = method_constructor(environments, args)
+        msolution = method.solution()
+
+        err_causal, err_noncausal = errors(sem.solution(), msolution)
+
+        solution = "{} {} {} {:.5f} {:.5f}".format(setup_str,
+                                                   method_name,
+                                                   pretty(msolution),
+                                                   err_causal,
+                                                   err_noncausal)
+        logging.info(solution)
+        solutions.append(solution)
+
+    lock.acquire()
+    with open(args["out_file"], "a") as f:
+        for solution in solutions:
+            f.write(solution + '\n')
+    lock.release()
+
+    return solutions
+
+
 def run_experiment(args):
     if args["seed"] >= 0:
         torch.manual_seed(args["seed"])
         numpy.random.seed(args["seed"])
-        torch.set_num_threads(1)
+        # torch.set_num_threads(1)
 
     all_methods = {
         "ERM": EmpiricalRiskMinimizer,
@@ -66,7 +99,6 @@ def run_experiment(args):
 
     if args["setup_sem"] == "chain":
         for rep_i in range(args["n_reps"]):
-            logging.info(f'repetition {rep_i}')
             for hidden in args["setup_hidden"]:
                 for hetero in args["setup_hetero"]:
                     for scramble in args["setup_scramble"]:
@@ -87,31 +119,14 @@ def run_experiment(args):
     else:
         raise NotImplementedError
 
+    # write lock to avoid overwriting output file from multiple threads
+    m = mp.Manager()
+    l = m.Lock()
 
-    for sem, environments, setup_str in zip(all_sems, all_environments, all_setup_strs):
-        solutions = [
-            "{} SEM {} {:.5f} {:.5f}".format(setup_str,
-                                             pretty(sem.solution()), 0, 0)
-        ]
+    solutions = Parallel(n_jobs=4)(delayed(run_methods)
+                                   (methods, setup_str, sem, environments, args, l) for sem, environments, setup_str in zip(all_sems, all_environments, all_setup_strs))
 
-        for method_name, method_constructor in methods.items():
-            logging.debug(f'run {setup_str} {method_name}')
-            method = method_constructor(environments, args)
-            msolution = method.solution()
-
-            err_causal, err_noncausal = errors(sem.solution(), msolution)
-
-            solution = "{} {} {} {:.5f} {:.5f}".format(setup_str,
-                                                       method_name,
-                                                       pretty(msolution),
-                                                       err_causal,
-                                                       err_noncausal)
-            logging.info(solution)
-            with open(args["out_file"], "a") as f:
-                f.write(solution + '\n')
-            solutions.append(solution)
-
-        all_solutions += solutions
+    all_solutions += solutions
 
     return all_solutions
 

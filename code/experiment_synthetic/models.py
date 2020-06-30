@@ -68,7 +68,7 @@ class InvariantRiskMinimization(object):
         loss = torch.nn.MSELoss().to(self.device)
 
 
-        for iteration in tqdm(range(args["n_iterations"])):
+        for iteration in range(args["n_iterations"]):
             penalty = torch.zeros((1,1), device=self.device)
             error = torch.zeros((1,1), device=self.device)
 
@@ -85,9 +85,9 @@ class InvariantRiskMinimization(object):
             if False and args["verbose"] and iteration % 1000 == 0:
                 w_str = pretty(self.solution())
                 print("{:05d} | {:.5f} | {:.5f} | {:.5f} | {}".format(iteration,
-                                                                      reg,
-                                                                      error,
-                                                                      penalty,
+                                                                      float(reg.detach()),
+                                                                      float(error.detach()),
+                                                                      float(penalty.detach()),
                                                                       w_str))
 
     def solution(self):
