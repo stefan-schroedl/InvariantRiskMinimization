@@ -34,6 +34,9 @@ class InvariantRiskMinimization(object):
     def __init__(self, environments, args):
         best_reg = 0
         best_err = 1e6
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+        environments = [(x.to(self.device), y.to(self.device)) for x,y in environments]
 
         x_val = environments[-1][0]
         y_val = environments[-1][1]
@@ -54,18 +57,21 @@ class InvariantRiskMinimization(object):
         self.phi = best_phi
 
     def train(self, environments, args, reg=0):
+        reg = torch.Tensor([reg]).to(self.device)
         dim_x = environments[0][0].size(1)
 
-        self.phi = torch.nn.Parameter(torch.eye(dim_x, dim_x))
-        self.w = torch.ones(dim_x, 1)
+        self.phi = torch.nn.Parameter(torch.eye(dim_x, dim_x, device=self.device))
+        self.w = torch.ones(dim_x, 1, device=self.device)
         self.w.requires_grad = True
 
         opt = torch.optim.Adam([self.phi], lr=args["lr"])
-        loss = torch.nn.MSELoss()
+        loss = torch.nn.MSELoss().to(self.device)
+
 
         for iteration in tqdm(range(args["n_iterations"])):
-            penalty = 0
-            error = 0
+            penalty = torch.zeros((1,1), device=self.device)
+            error = torch.zeros((1,1), device=self.device)
+
             for x_e, y_e in environments:
                 error_e = loss(x_e @ self.phi @ self.w, y_e)
                 penalty += grad(error_e, self.w,
@@ -73,7 +79,7 @@ class InvariantRiskMinimization(object):
                 error += error_e
 
             opt.zero_grad()
-            (reg * error + (1 - reg) * penalty).backward()
+            (reg * error + (1 - reg) * penalty).squeeze().backward()
             opt.step()
 
             if False and args["verbose"] and iteration % 1000 == 0:
