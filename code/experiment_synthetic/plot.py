@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -117,7 +118,7 @@ def plot_experiment(all_solutions, category, fname):
     results = {}
 
     for line in all_solutions:
-        words = line.split(" ")
+        words = line.strip().split(" ")
         setup = str(words[0])
         model = str(words[1])
         err_causal = float(words[-2])
@@ -147,6 +148,6 @@ if __name__ == "__main__":
         fname = "synthetic_results.pt"
     else:
         fname = sys.argv[1]
-    lines = torch.load(fname)
+    lines = open(fname, 'r').readlines()
     plot_experiment(lines, "F", "results_f.pdf")
     plot_experiment(lines, "P", "results_p.pdf")

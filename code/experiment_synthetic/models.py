@@ -8,11 +8,14 @@
 import numpy as np
 import torch
 import math
+import logging
 
 from sklearn.linear_model import LinearRegression
 from itertools import chain, combinations
 from scipy.stats import f as fdist
 from scipy.stats import ttest_ind
+
+from tqdm import tqdm
 
 from torch.autograd import grad
 
@@ -36,6 +39,7 @@ class InvariantRiskMinimization(object):
         y_val = environments[-1][1]
 
         for reg in [0, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1]:
+            logging.debug(f'regularizer {reg}')
             self.train(environments[:-1], args, reg=reg)
             err = (x_val @ self.solution() - y_val).pow(2).mean().item()
 
@@ -59,7 +63,7 @@ class InvariantRiskMinimization(object):
         opt = torch.optim.Adam([self.phi], lr=args["lr"])
         loss = torch.nn.MSELoss()
 
-        for iteration in range(args["n_iterations"]):
+        for iteration in tqdm(range(args["n_iterations"])):
             penalty = 0
             error = 0
             for x_e, y_e in environments:
@@ -72,7 +76,7 @@ class InvariantRiskMinimization(object):
             (reg * error + (1 - reg) * penalty).backward()
             opt.step()
 
-            if args["verbose"] and iteration % 1000 == 0:
+            if False and args["verbose"] and iteration % 1000 == 0:
                 w_str = pretty(self.solution())
                 print("{:05d} | {:.5f} | {:.5f} | {:.5f} | {}".format(iteration,
                                                                       reg,
