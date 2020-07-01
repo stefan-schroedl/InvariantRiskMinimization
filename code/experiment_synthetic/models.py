@@ -182,3 +182,45 @@ class EmpiricalRiskMinimizer(object):
 
     def solution(self):
         return self.w
+
+
+class RiskMinimizationGames(object):
+    def __init__(self, environments, args):
+        self.train(environments, args)
+
+    def train(self, environments, args):
+
+        dim_x = environments[0][0].size(1)
+        self.phi = [torch.nn.Parameter(torch.rand(dim_x, 1)) for i in range(len(environments))]
+        self.phi_best = None
+        opt = torch.optim.Adam(self.phi, lr=1e-3)
+        error_e = [0] * len(environments)
+        score = [0] * len(environments)
+        loss = torch.nn.MSELoss()
+        error_best = float('inf')
+
+        for iteration in range(args["n_iterations"]):
+            error = 0
+            opt.zero_grad()
+            for i, (x_e, y_e) in enumerate(environments):
+                for j in range(len(score)):
+                    self.phi[j].requires_grad = (i == j)
+                score = [x_e @ p / len(environments) for p in self.phi]
+                error_e[i] = loss(sum(score), y_e)
+                error_e[i].backward()
+                error += float(error_e[i].detach())
+            opt.step()
+            if error < error_best:
+                error_best = error
+                self.phi_best = self.phi
+
+            #if iteration % 1 == 0:
+            #    #print('GAMES', iteration, error, error_e, 'phiavg', sum(self.phi)/len(self.phi), 'phi:', self.phi)
+            #    print('GAMES', iteration, error)
+
+        if args["verbose"]:
+            print("RMG has {:.3f} validation error.".format(error_best))
+
+
+    def solution(self):
+        return sum(self.phi_best)/len(self.phi_best)

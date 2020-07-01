@@ -78,7 +78,7 @@ def plot_bars(results, category, which, sep=1.1):
             boxes_vars.append(np.std(np.array(results[setup][model])[:, idx]))
             boxes_colors.append("C" + str(m))
 
-        plt.bar([0, 1, 2],
+        plt.bar(list(range(len(boxes_means))),
                 boxes_means,
                 yerr=np.array(boxes_vars),
                 color=boxes_colors,

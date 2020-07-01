@@ -10,7 +10,6 @@ from sem import ChainEquationModel
 from models import *
 
 import argparse
-import logging
 import torch
 import numpy
 
@@ -46,13 +45,16 @@ def errors(w, w_hat):
 
 def run_methods(methods, setup_str, sem, environments, args, lock):
 
+    logging.basicConfig(level=getattr(logging, args["log_level"]), format="[%(asctime)s\t%(levelname)s]\t%(message)s")
+
     solutions = [
             "{} SEM {} {:.5f} {:.5f}".format(setup_str,
                                                pretty(sem.solution()), 0, 0)
         ]
 
     for method_name, method_constructor in methods.items():
-        logging.debug(f'run {setup_str} {method_name}')
+
+        logging.info(f'run {method_name} {setup_str}')
         method = method_constructor(environments, args)
         msolution = method.solution()
 
@@ -84,7 +86,8 @@ def run_experiment(args):
     all_methods = {
         "ERM": EmpiricalRiskMinimizer,
         "ICP": InvariantCausalPrediction,
-        "IRM": InvariantRiskMinimization
+        "IRM": InvariantRiskMinimization,
+        "RMG": RiskMinimizationGames
     }
 
     if args["methods"] == "all":
@@ -144,7 +147,7 @@ if __name__ == '__main__':
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--verbose', type=int, default=0)
     parser.add_argument("--log_level", choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'], default = 'DEBUG', help="Set the logging level")
-    parser.add_argument('--methods', type=str, default="ERM,ICP,IRM")
+    parser.add_argument('--methods', type=str, default="ERM,ICP,IRM,RMG")
     parser.add_argument('--alpha', type=float, default=0.05)
     parser.add_argument('--setup_sem', type=str, default="chain")
     parser.add_argument('--setup_hidden', type=int, nargs='+', default=[0])
