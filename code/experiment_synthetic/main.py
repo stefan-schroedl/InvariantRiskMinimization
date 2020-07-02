@@ -58,7 +58,7 @@ def run_methods(methods, setup_str, sem, environments, args, lock):
         method = method_constructor(environments, args)
         msolution = method.solution()
 
-        err_causal, err_noncausal = errors(sem.solution(), msolution)
+        err_causal, err_noncausal = errors(sem.solution_unscrambled(), sem.scramble @ msolution.view(-1,1))
 
         solution = "{} {} {} {:.5f} {:.5f}".format(setup_str,
                                                    method_name,
@@ -157,6 +157,5 @@ if __name__ == '__main__':
     args = dict(vars(parser.parse_args()))
 
     logging.basicConfig(level=getattr(logging, args["log_level"]), format="[%(asctime)s\t%(levelname)s]\t%(message)s")
-    all_solutions = run_experiment(args)
-    print("\n".join(all_solutions))
+    run_experiment(args)
 
