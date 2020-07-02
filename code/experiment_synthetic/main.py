@@ -55,7 +55,7 @@ def run_methods(methods, setup_str, sem, environments, args, lock):
     for method_name, method_constructor in methods.items():
 
         logging.info(f'run {method_name} {setup_str}')
-        method = method_constructor(environments, args)
+        method = method_constructor(environments, args, setup_str)
         msolution = method.solution()
 
         err_causal, err_noncausal = errors(sem.solution_unscrambled(), sem.scramble @ msolution.view(-1,1))
@@ -81,13 +81,16 @@ def run_experiment(args):
     if args["seed"] >= 0:
         torch.manual_seed(args["seed"])
         numpy.random.seed(args["seed"])
+        random.seed(args["seed"])
         # torch.set_num_threads(1)
 
     all_methods = {
         "ERM": EmpiricalRiskMinimizer,
         "ICP": InvariantCausalPrediction,
         "IRM": InvariantRiskMinimization,
-        "RMG": RiskMinimizationGames
+        "IRMS": InvariantRiskMinimizationSimple,
+        "RMG": RiskMinimizationGames,
+        "SPC": SpecialistRiskGames
     }
 
     if args["methods"] == "all":
@@ -147,7 +150,7 @@ if __name__ == '__main__':
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--verbose', type=int, default=0)
     parser.add_argument("--log_level", choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'], default = 'DEBUG', help="Set the logging level")
-    parser.add_argument('--methods', type=str, default="ERM,ICP,IRM,RMG")
+    parser.add_argument('--methods', type=str, default="ERM,ICP,IRM,IRMS,RMG,SPC")
     parser.add_argument('--alpha', type=float, default=0.05)
     parser.add_argument('--setup_sem', type=str, default="chain")
     parser.add_argument('--setup_hidden', type=int, nargs='+', default=[0])

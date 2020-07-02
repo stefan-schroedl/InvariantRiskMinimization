@@ -72,11 +72,12 @@ def plot_bars(results, category, which, sep=1.1):
         counter += 1
 
         for m, model in enumerate(models):
-            boxes.append(np.array(results[setup][model])[:, idx])
-            boxes_means.append(
-                np.mean(np.array(results[setup][model])[:, idx]))
-            boxes_vars.append(np.std(np.array(results[setup][model])[:, idx]))
-            boxes_colors.append("C" + str(m))
+            if model in results[setup]:
+                boxes.append(np.array(results[setup][model])[:, idx])
+                boxes_means.append(
+                    np.mean(np.array(results[setup][model])[:, idx]))
+                boxes_vars.append(np.std(np.array(results[setup][model])[:, idx]))
+                boxes_colors.append("C" + str(m))
 
         plt.bar(list(range(len(boxes_means))),
                 boxes_means,
