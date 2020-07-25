@@ -9,6 +9,8 @@ import numpy as np
 import torch
 import math
 import logging
+import random
+import copy
 
 from sklearn.linear_model import LinearRegression
 from itertools import chain, combinations
@@ -295,6 +297,177 @@ class RiskMinimizationGames(object):
 
     def solution(self):
         return sum(self.phi_best)/len(self.phi_best)
+
+
+class MAML(object):
+    """ Memory-augmented meta learning """
+    def __init__(self, environments, args, setup_str=''):
+
+        self.train(environments, args)
+
+
+    def split_valid(self, e, k):
+        i = random.choices(range(e[0].shape[0]),k=k)
+        i_inv = list(set(range(e[0].shape[0])) - set(i))
+        return [(x[i], x[i_inv]) for x in e]
+
+
+    def train(self, environments, args, reg=0):
+
+        n = environments[0][0].size(1)
+        dim_x = environments[0][0].size(1)
+
+        self.phi = torch.nn.Parameter(torch.rand(dim_x, 1))
+        self.phi_best = copy.deepcopy(self.phi)
+        err_best = float('inf')
+        iter_best = 0
+        
+        opt = torch.optim.Adam([self.phi], lr=args["lr"])
+        steps_inner = args["n_iterations_inner"]
+        lr_inner = args["lr_inner"]
+        sz_valid = int(.8 * n)
+        loss = torch.nn.MSELoss()
+
+        for iteration in range(args["n_iterations"]):
+            opt.zero_grad()
+            error = torch.zeros(1)
+            for x_e, y_e in environments:
+                ((x_tr, x_ts), (y_tr, y_ts)) = self.split_valid((x_e, y_e), sz_valid)
+
+                phi_inner = self.phi.clone()
+                for j in range(steps_inner):
+                    error_e = loss(x_tr @ phi_inner, y_tr)
+                    grad = torch.autograd.grad(error_e, phi_inner)
+                    phi_inner -= lr_inner * grad[0]
+
+                error += loss(x_ts @ phi_inner, y_ts) / len(environments)
+
+            err_flt = float(error.detach())
+            if err_flt < err_best:
+                iter_best = iteration
+                self.phi_best = copy.deepcopy(self.phi)
+                err_best = err_flt
+
+            error.backward()
+            opt.step()
+
+            if args["verbose"] and iteration % 100 == 0:
+                w_str = pretty(self.solution())
+                print("{:05d} | {:.5f} | {}".format(iteration,
+                                                    err_flt,
+                                                    w_str))
+        print(f'best iter: {iter_best} {err_best}')
+        self.phi = self.phi_best
+
+    def solution(self):
+        return self.phi
+
+
+class MetaSGD(object):
+    """ meta learning """
+    def __init__(self, environments, args, setup_str=''):
+
+        self.train(environments, args)
+
+
+    def split_valid(self, e, k):
+        i = random.choices(range(e[0].shape[0]),k=k)
+        i_inv = list(set(range(e[0].shape[0])) - set(i))
+        return [(x[i], x[i_inv]) for x in e]
+
+
+    def train(self, environments, args, reg=0):
+
+        n = environments[0][0].size(1)
+        dim_x = environments[0][0].size(1)
+
+        self.phi = torch.nn.Parameter(torch.rand(dim_x, 1))
+        self.alpha = torch.nn.Parameter(torch.ones(dim_x, 1) * args["lr_inner"])
+        
+        opt = torch.optim.Adam([self.phi, self.alpha], lr=args["lr"])
+        steps_inner = args["n_iterations_inner"]
+        sz_valid = int(.5 * n)
+        loss = torch.nn.MSELoss()
+
+        for iteration in range(args["n_iterations"]):
+            opt.zero_grad()
+            error = torch.zeros(1)
+            for i, (x_e, y_e) in enumerate(environments):
+                ((x_tr, x_ts), (y_tr, y_ts)) = self.split_valid((x_e, y_e), sz_valid)
+
+                phi_inner = self.phi.clone()
+                for j in range(steps_inner):
+                    error_e = loss(x_tr @ phi_inner, y_tr)
+                    grad = torch.autograd.grad(error_e, phi_inner)
+                    phi_inner -= self.alpha * grad[0]
+
+                error_e = loss(x_ts @ phi_inner, y_ts) / len(environments)
+                if args["verbose"] and iteration % 100 == 0:
+                    g = torch.autograd.grad(error_e, self.alpha, retain_graph = True)
+                    alpha_str = pretty(g[0])
+                    print(f'GRAD {i} {float(error_e.detach()):.5f} | {alpha_str}')
+                error += error_e
+
+            error.backward()
+            opt.step()
+
+            if args["verbose"] and iteration % 100 == 0:
+                w_str = pretty(self.solution())
+                alpha_str = pretty(self.alpha)
+                err_flt = float(error.detach())
+
+                print("{:05d} | {:.5f} | {} | {}".format(iteration,
+                                                         err_flt,
+                                                         w_str,
+                                                         alpha_str))
+
+
+    def solution(self):
+        return self.phi
+
+
+class SpecialistPenalty(object):
+
+    """ WIP"""
+
+    def __init__(self, environments, args, setup_str=''):
+
+        self.train(environments, args)
+
+    def train(self, environments, args, reg=0):
+
+        models = [EmpiricalRiskMinimizer([e], args) for e in environments]
+
+        n = environments[0][0].size(1)
+        dim_x = environments[0][0].size(1)
+
+        self.phi = torch.nn.Parameter(torch.rand(dim_x, 1))
+
+        opt = torch.optim.Adam([self.phi], lr=args["lr"])
+        alpha = args["alpha"]
+        loss = torch.nn.MSELoss()
+
+        for iteration in range(args["n_iterations"]):
+            opt.zero_grad()
+            error = torch.zeros(1)
+            for i, (x_e, y_e) in enumerate(environments):
+                y_imp = sum(x_e @ models[j].solution().t() for j in range(len(environments)) if j != i) / len(environments)
+
+                pred = x_e @ self.phi
+                error += (1 - alpha) * loss(pred, y_e) + alpha * loss(pred, y_imp)
+
+            error.backward()
+            opt.step()
+
+            if args["verbose"] and iteration % 100 == 0:
+                err_flt = float(error.detach())
+                w_str = pretty(self.solution())
+                print("{:05d} | {:.5f} | {}".format(iteration,
+                                                    err_flt,
+                                                    w_str))
+
+    def solution(self):
+        return self.phi
 
 
 class SpecialistRiskGames(object):
