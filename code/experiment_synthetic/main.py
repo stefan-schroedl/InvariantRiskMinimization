@@ -94,7 +94,7 @@ def run_experiment(args):
         "MSGD": MetaSGD,
         "SPC": SpecialistRiskGames,
         "SPP": SpecialistPenalty,
-
+        "GVP": GradVarPenalty,
     }
 
     if args["methods"] == "all":
@@ -156,7 +156,7 @@ if __name__ == '__main__':
     parser.add_argument('--lr_inner', type=float, default=1e-4)
     parser.add_argument('--verbose', type=int, default=0)
     parser.add_argument("--log_level", choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'], default = 'DEBUG', help="Set the logging level")
-    parser.add_argument('--methods', type=str, default="ERM,ICP,IRM,IRMS,RMG,SPC,MAML,SPP,MSGD")
+    parser.add_argument('--methods', type=str, default="ERM,ICP,IRM,IRMS,RMG,SPC,MAML,SPP,MSGD,GVP")
     parser.add_argument('--alpha', type=float, default=0.05)
     parser.add_argument('--setup_sem', type=str, default="chain")
     parser.add_argument('--setup_hidden', type=int, nargs='+', default=[0])

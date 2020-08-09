@@ -37,6 +37,14 @@ def abscorr(v1, v2):
     x= ((v1_norm * v2_norm).sum() / (torch.norm(v1_norm, 2) * torch.norm(v2_norm, 2))).squeeze().abs()
     return x
 
+def env_errors(environments):
+    errors = []
+    loss = torch.nn.MSELoss()
+    for i, (x_e, y_e) in enumerate(environments):
+        coef = torch.Tensor(LinearRegression(fit_intercept=False).fit(x_e, y_e).coef_).t()
+        error = loss(x_e @ coef, y_e)
+        errors.append(float(error.detach()))
+    return errors
 
 class InvariantRiskMinimization(object):
     def __init__(self, environments, args, setup_str=''):
@@ -115,7 +123,7 @@ class InvariantRiskMinimizationSimple(object):
         x_val = environments[-1][0]
         y_val = environments[-1][1]
 
-        for reg in [0, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1]:
+        for reg in [1e-2]: # [0, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1]:
             logging.debug(f'regularizer {reg}')
             self.train(environments[:-1], args, reg=reg)
             err = (x_val @ self.solution() - y_val).pow(2).mean().item()
@@ -146,23 +154,27 @@ class InvariantRiskMinimizationSimple(object):
             penalty = torch.zeros((1,1), device=self.device)
             error = torch.zeros((1,1), device=self.device)
 
+            penalties_raw = []
             for x_e, y_e in environments:
                 error_e = loss(x_e @ self.phi * self.w, y_e)
-                penalty += grad(error_e, self.w,
-                                create_graph=True)[0].pow(2).mean()
+                penalty_raw =  grad(error_e, self.w, create_graph=True)[0]
+                penalties_raw.append(penalty_raw)
+                penalty += penalty_raw.pow(2).mean()
                 error += error_e
 
+            penalties_raw = torch.cat(penalties_raw, -1)
             opt.zero_grad()
             (reg * error + (1 - reg) * penalty).squeeze().backward()
             opt.step()
 
-            if False and args["verbose"] and iteration % 1000 == 0:
+            if args["verbose"] and iteration % 1000 == 0:
                 w_str = pretty(self.solution())
                 print("{:05d} | {:.5f} | {:.5f} | {:.5f} | {}".format(iteration,
                                                                       float(reg.detach()),
                                                                       float(error.detach()),
                                                                       float(penalty.detach()),
                                                                       w_str))
+                print('PEN', penalties_raw)
 
     def solution(self):
         return self.phi * self.w
@@ -246,15 +258,23 @@ class InvariantCausalPrediction(object):
 
 
 class EmpiricalRiskMinimizer(object):
-    def __init__(self, environments, args, setup_str=''):
+    def __init__(self, environments, args, setup_str='', weighted=False):
         x_all = torch.cat([x for (x, y) in environments]).numpy()
         y_all = torch.cat([y for (x, y) in environments]).numpy()
 
-        w = LinearRegression(fit_intercept=False).fit(x_all, y_all).coef_
-        self.w = torch.Tensor(w)
+        if not weighted:
+            phi = LinearRegression(fit_intercept=False).fit(x_all, y_all).coef_
+            self.phi = torch.Tensor(phi)
+        else:
+            base = env_errors(environments)
+            reg = min(base)
+            self.w = [(min(base) + reg) / (x + reg) for x in base]
+            w_all = np.concatenate([[self.w[i]] * len(environments[i][0]) for i in range(len(environments))])
+            phi = LinearRegression(fit_intercept=False).fit(x_all, y_all, w_all).coef_
+            self.phi = torch.Tensor(phi)
 
     def solution(self):
-        return self.w
+        return self.phi
 
 
 class RiskMinimizationGames(object):
@@ -321,7 +341,7 @@ class MAML(object):
         self.phi_best = copy.deepcopy(self.phi)
         err_best = float('inf')
         iter_best = 0
-        
+
         opt = torch.optim.Adam([self.phi], lr=args["lr"])
         steps_inner = args["n_iterations_inner"]
         lr_inner = args["lr_inner"]
@@ -381,9 +401,15 @@ class MetaSGD(object):
         n = environments[0][0].size(1)
         dim_x = environments[0][0].size(1)
 
+        base = env_errors(environments)
+        reg = min(base)
+        self.w = [(min(base) + reg) / (x + reg) for x in base]
+        #self.w = [1.0] * len(environments)
+        print('WEIGHTS', self.w)
+
         self.phi = torch.nn.Parameter(torch.rand(dim_x, 1))
         self.alpha = torch.nn.Parameter(torch.ones(dim_x, 1) * args["lr_inner"])
-        
+
         opt = torch.optim.Adam([self.phi, self.alpha], lr=args["lr"])
         steps_inner = args["n_iterations_inner"]
         sz_valid = int(.5 * n)
@@ -401,7 +427,7 @@ class MetaSGD(object):
                     grad = torch.autograd.grad(error_e, phi_inner)
                     phi_inner -= self.alpha * grad[0]
 
-                error_e = loss(x_ts @ phi_inner, y_ts) / len(environments)
+                error_e = self.w[i] * loss(x_ts @ phi_inner, y_ts) / len(environments)
                 if args["verbose"] and iteration % 100 == 0:
                     g = torch.autograd.grad(error_e, self.alpha, retain_graph = True)
                     alpha_str = pretty(g[0])
@@ -436,7 +462,21 @@ class SpecialistPenalty(object):
 
     def train(self, environments, args, reg=0):
 
+        loss = torch.nn.MSELoss()
         models = [EmpiricalRiskMinimizer([e], args) for e in environments]
+
+        for i, (x_e, y_e) in enumerate(environments):
+            with torch.no_grad():
+                pred = x_e @ models[i].solution().t()
+                error = loss(pred, y_e)
+                err_flt = float(error.detach())
+                w_str = pretty(models[i].solution())
+                print("{} | {:.5f} | {}".format(i,
+                                                    err_flt,
+                                                    w_str))
+
+        sys.exit(0)
+
 
         n = environments[0][0].size(1)
         dim_x = environments[0][0].size(1)
@@ -445,7 +485,7 @@ class SpecialistPenalty(object):
 
         opt = torch.optim.Adam([self.phi], lr=args["lr"])
         alpha = args["alpha"]
-        loss = torch.nn.MSELoss()
+
 
         for iteration in range(args["n_iterations"]):
             opt.zero_grad()
@@ -482,7 +522,7 @@ class SpecialistRiskGames(object):
 
         pen_reg = 0 # 1e-2
         pen_corr = reg
-    
+
         dim_x = environments[0][0].size(1)
         n = len(environments) + 1
         # first model is common, the others are environment specialists
@@ -545,3 +585,75 @@ class SpecialistRiskGames(object):
 
     def solution(self):
         return self.phi[0]
+
+
+class GradVarPenalty(object):
+    """
+    WIP
+    use penalty w * var_task(grad)
+    """
+    def __init__(self, environments, args, setup_str=''):
+
+        self.alpha = args["alpha"]
+        self.train(environments, args)
+
+    def train(self, environments, args, reg=0):
+
+        n = environments[0][0].size(1)
+        dim_x = environments[0][0].size(1)
+
+        # self.phi = torch.nn.Parameter(torch.rand(dim_x, 1))
+        self.phi = torch.nn.Parameter(EmpiricalRiskMinimizer(environments, args).solution().view(dim_x, 1))
+
+        opt = torch.optim.Adam([self.phi], lr=args["lr"])
+        loss = torch.nn.MSELoss()
+
+        for iteration in range(args["n_iterations"]):
+            opt.zero_grad()
+
+            error = torch.zeros(1)
+            pen_mrg = torch.zeros(1)
+            grad = []
+            for i, (x_e, y_e) in enumerate(environments):
+                error_e = loss(x_e @ self.phi, y_e)
+                #print('er', self.phi, error_e)
+                grad_e = torch.autograd.grad(error_e, self.phi, retain_graph=True)[0]
+                grad.append(grad_e)
+                error += error_e
+
+            grad = torch.cat(grad, dim=1)
+            m = grad.mean(dim=1)
+            p = grad.var(dim=1) # / (m * m + 1e-3)
+            p_sum = (self.phi * self.phi * p).sum()
+            #print(grad)
+            assert not torch.isnan(p_sum).any()
+            error_t = (1-self.alpha) * error + self.alpha * p_sum
+            grad_p = torch.autograd.grad(p_sum, self.phi, retain_graph=True)[0]
+            grad_ee = torch.autograd.grad(error, self.phi, retain_graph=True)[0]
+
+            # print(error)
+            error_t.backward()
+            opt.step()
+            if args["verbose"] and iteration % 1000 == 0:
+                err_flt = (1-self.alpha) * float(error.detach())
+                p_flt = self.alpha * float(p_sum.detach())
+                w_str = pretty(self.solution())
+                p_str = pretty(p)
+                print("{:05d} | {:.5f} | {:.5f} | {} | {}".format(iteration,
+                                                                  err_flt,
+                                                                  p_flt,
+                                                                  w_str,
+                                                                  p_str))
+
+                print('GRAD error', - grad)
+                print('P', - p)
+                print('uncentered', - grad.pow(2).sum(dim=1))
+                print('GRAD penalty', - grad_p)
+                print('GRAD EE', - grad_ee)
+                print(f'phi grad {pretty(self.phi.grad)}')
+                print(f'm {pretty(m)} v {pretty(p)}')
+
+
+
+    def solution(self):
+        return self.phi

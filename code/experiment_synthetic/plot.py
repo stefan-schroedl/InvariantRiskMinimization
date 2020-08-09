@@ -85,7 +85,7 @@ def plot_bars(results, category, which, sep=1.1):
                 color=boxes_colors,
                 hatch=hatch,
                 alpha=0.7,
-                log=True)
+                log=False)
 
         if which == "causal":
             plt.xticks([1], [title])
